@@ -41,6 +41,36 @@ type ExerciseRecord = {
   title?: string;
 };
 
+type DistanceRecord = {
+  startTime: string;
+  endTime: string;
+  distance: {inMeters: number};
+};
+
+type CaloriesRecord = {
+  startTime: string;
+  endTime: string;
+  energy: {inKilocalories: number};
+};
+
+type PowerRecord = {
+  startTime: string;
+  endTime: string;
+  samples: {time: string; power: {inWatts: number}}[];
+};
+
+type SpeedRecord = {
+  startTime: string;
+  endTime: string;
+  samples: {time: string; speed: {inMetersPerSecond: number}}[];
+};
+
+type CadenceRecord = {
+  startTime: string;
+  endTime: string;
+  samples: {time: string; revolutionsPerMinute: number}[];
+};
+
 const EXERCISE_TYPE_NAMES: Record<number, string> = {
   0: 'Other',
   2: 'Badminton',
@@ -98,6 +128,11 @@ export function HealthConnectScreen() {
   const [status, setStatus] = useState<Status>('loading');
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<HealthData | null>(null);
+  const [distanceRecords, setDistanceRecords] = useState<DistanceRecord[]>([]);
+  const [caloriesRecords, setCaloriesRecords] = useState<CaloriesRecord[]>([]);
+  const [powerRecords, setPowerRecords] = useState<PowerRecord[]>([]);
+  const [speedRecords, setSpeedRecords] = useState<SpeedRecord[]>([]);
+  const [cadenceRecords, setCadenceRecords] = useState<CadenceRecord[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -139,6 +174,11 @@ export function HealthConnectScreen() {
         {accessType: 'read', recordType: 'HeartRate'},
         {accessType: 'read', recordType: 'Steps'},
         {accessType: 'read', recordType: 'ExerciseSession'},
+        {accessType: 'read', recordType: 'Distance'},
+        {accessType: 'read', recordType: 'ActiveCaloriesBurned'},
+        {accessType: 'read', recordType: 'Power'},
+        {accessType: 'read', recordType: 'Speed'},
+        {accessType: 'read', recordType: 'CyclingPedalingCadence'},
       ]);
 
       const now = new Date();
@@ -149,17 +189,28 @@ export function HealthConnectScreen() {
         endTime: now.toISOString(),
       };
 
-      const [heartRate, steps, exercise] = await Promise.all([
-        readRecords('HeartRate', {timeRangeFilter}),
-        readRecords('Steps', {timeRangeFilter}),
-        readRecords('ExerciseSession', {timeRangeFilter}),
-      ]);
+      const [heartRate, steps, exercise, distance, calories, power, speed, cadence] =
+        await Promise.all([
+          readRecords('HeartRate', {timeRangeFilter}),
+          readRecords('Steps', {timeRangeFilter}),
+          readRecords('ExerciseSession', {timeRangeFilter}),
+          readRecords('Distance', {timeRangeFilter}),
+          readRecords('ActiveCaloriesBurned', {timeRangeFilter}),
+          readRecords('Power', {timeRangeFilter}),
+          readRecords('Speed', {timeRangeFilter}),
+          readRecords('CyclingPedalingCadence', {timeRangeFilter}),
+        ]);
 
       setData({
         heartRateRecords: heartRate.records as unknown as HeartRateRecord[],
         stepsRecords: steps.records as unknown as StepsRecord[],
         exerciseRecords: exercise.records as unknown as ExerciseRecord[],
       });
+      setDistanceRecords(distance.records as unknown as DistanceRecord[]);
+      setCaloriesRecords(calories.records as unknown as CaloriesRecord[]);
+      setPowerRecords(power.records as unknown as PowerRecord[]);
+      setSpeedRecords(speed.records as unknown as SpeedRecord[]);
+      setCadenceRecords(cadence.records as unknown as CadenceRecord[]);
     } catch (e: any) {
       setError(e.message || 'Failed to fetch data');
     } finally {
@@ -230,7 +281,15 @@ export function HealthConnectScreen() {
                 <StepsSection records={data.stepsRecords} />
               )}
               {item.key === 'exercise' && (
-                <ExerciseSection records={data.exerciseRecords} />
+                <ExerciseSection
+                  records={data.exerciseRecords}
+                  heartRateRecords={data.heartRateRecords}
+                  distanceRecords={distanceRecords}
+                  caloriesRecords={caloriesRecords}
+                  powerRecords={powerRecords}
+                  speedRecords={speedRecords}
+                  cadenceRecords={cadenceRecords}
+                />
               )}
             </View>
           )}
@@ -315,38 +374,286 @@ function StepsSection({records}: {records: StepsRecord[]}) {
   );
 }
 
-function ExerciseSection({records}: {records: ExerciseRecord[]}) {
+/** Find records that overlap with a given time range. */
+function findOverlapping<T extends {startTime: string; endTime: string}>(
+  records: T[],
+  start: string,
+  end: string,
+): T[] {
+  const s = new Date(start).getTime();
+  const e = new Date(end).getTime();
+  return records.filter(r => {
+    const rs = new Date(r.startTime).getTime();
+    const re = new Date(r.endTime).getTime();
+    return rs < e && re > s;
+  });
+}
+
+function ExerciseSection({
+  records,
+  heartRateRecords,
+  distanceRecords,
+  caloriesRecords,
+  powerRecords,
+  speedRecords,
+  cadenceRecords,
+}: {
+  records: ExerciseRecord[];
+  heartRateRecords: HeartRateRecord[];
+  distanceRecords: DistanceRecord[];
+  caloriesRecords: CaloriesRecord[];
+  powerRecords: PowerRecord[];
+  speedRecords: SpeedRecord[];
+  cadenceRecords: CadenceRecord[];
+}) {
+  const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+
   if (records.length === 0) {
     return <Text style={styles.emptyText}>No exercise data</Text>;
   }
 
+  const sorted = records.slice().reverse();
+
   return (
     <View>
       <Text style={styles.recordCount}>{records.length} sessions</Text>
-      {records
-        .slice()
-        .reverse()
-        .map((record, i) => {
-          const duration = Math.round(
-            (new Date(record.endTime).getTime() -
-              new Date(record.startTime).getTime()) /
-              60000,
-          );
-          const typeName =
-            record.title ||
-            EXERCISE_TYPE_NAMES[record.exerciseType] ||
-            `Type ${record.exerciseType}`;
-          return (
-            <View key={i} style={styles.recordItem}>
-              <Text style={styles.recordTime}>
-                {formatDateTime(record.startTime)}
-              </Text>
-              <Text style={styles.recordValue}>
-                {typeName} | {duration} min
-              </Text>
+      {sorted.map((record, i) => {
+        const duration = Math.round(
+          (new Date(record.endTime).getTime() -
+            new Date(record.startTime).getTime()) /
+            60000,
+        );
+        const typeName =
+          record.title ||
+          EXERCISE_TYPE_NAMES[record.exerciseType] ||
+          `Type ${record.exerciseType}`;
+        const isExpanded = expandedIndex === i;
+
+        return (
+          <Pressable
+            key={i}
+            style={styles.recordItem}
+            onPress={() => setExpandedIndex(isExpanded ? null : i)}>
+            <View style={styles.exerciseRow}>
+              <View style={styles.exerciseRowLeft}>
+                <Text style={styles.recordTime}>
+                  {formatDateTime(record.startTime)}
+                </Text>
+                <Text style={styles.recordValue}>
+                  {typeName} | {duration} min
+                </Text>
+              </View>
+              <Text style={styles.chevron}>{isExpanded ? '\u25B2' : '\u25BC'}</Text>
             </View>
-          );
-        })}
+
+            {isExpanded && (
+              <ExerciseDetailView
+                record={record}
+                heartRateRecords={heartRateRecords}
+                distanceRecords={distanceRecords}
+                caloriesRecords={caloriesRecords}
+                powerRecords={powerRecords}
+                speedRecords={speedRecords}
+                cadenceRecords={cadenceRecords}
+              />
+            )}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function ExerciseDetailView({
+  record,
+  heartRateRecords,
+  distanceRecords,
+  caloriesRecords,
+  powerRecords,
+  speedRecords,
+  cadenceRecords,
+}: {
+  record: ExerciseRecord;
+  heartRateRecords: HeartRateRecord[];
+  distanceRecords: DistanceRecord[];
+  caloriesRecords: CaloriesRecord[];
+  powerRecords: PowerRecord[];
+  speedRecords: SpeedRecord[];
+  cadenceRecords: CadenceRecord[];
+}) {
+  // Distance
+  const overlappingDistance = findOverlapping(
+    distanceRecords,
+    record.startTime,
+    record.endTime,
+  );
+  const totalDistanceM = overlappingDistance.reduce(
+    (sum, r) => sum + r.distance.inMeters,
+    0,
+  );
+
+  // Calories
+  const overlappingCalories = findOverlapping(
+    caloriesRecords,
+    record.startTime,
+    record.endTime,
+  );
+  const totalCalories = overlappingCalories.reduce(
+    (sum, r) => sum + r.energy.inKilocalories,
+    0,
+  );
+
+  // Heart rate during session
+  const overlappingHr = findOverlapping(
+    heartRateRecords,
+    record.startTime,
+    record.endTime,
+  );
+  const hrSamples = overlappingHr.flatMap(r => r.samples);
+  const avgHr =
+    hrSamples.length > 0
+      ? Math.round(
+          hrSamples.reduce((s, v) => s + v.beatsPerMinute, 0) /
+            hrSamples.length,
+        )
+      : null;
+  const maxHr =
+    hrSamples.length > 0
+      ? Math.max(...hrSamples.map(s => s.beatsPerMinute))
+      : null;
+  const minHr =
+    hrSamples.length > 0
+      ? Math.min(...hrSamples.map(s => s.beatsPerMinute))
+      : null;
+
+  // Power
+  const overlappingPower = findOverlapping(
+    powerRecords,
+    record.startTime,
+    record.endTime,
+  );
+  const powerSamples = overlappingPower.flatMap(r => r.samples);
+  const avgPower =
+    powerSamples.length > 0
+      ? Math.round(
+          powerSamples.reduce((s, v) => s + v.power.inWatts, 0) /
+            powerSamples.length,
+        )
+      : null;
+  const maxPower =
+    powerSamples.length > 0
+      ? Math.round(Math.max(...powerSamples.map(s => s.power.inWatts)))
+      : null;
+
+  // Speed
+  const overlappingSpeed = findOverlapping(
+    speedRecords,
+    record.startTime,
+    record.endTime,
+  );
+  const speedSamples = overlappingSpeed.flatMap(r => r.samples);
+  const avgSpeedMs =
+    speedSamples.length > 0
+      ? speedSamples.reduce((s, v) => s + v.speed.inMetersPerSecond, 0) /
+        speedSamples.length
+      : null;
+  const maxSpeedMs =
+    speedSamples.length > 0
+      ? Math.max(...speedSamples.map(s => s.speed.inMetersPerSecond))
+      : null;
+
+  // Cadence
+  const overlappingCadence = findOverlapping(
+    cadenceRecords,
+    record.startTime,
+    record.endTime,
+  );
+  const cadenceSamples = overlappingCadence.flatMap(r => r.samples);
+  const avgCadence =
+    cadenceSamples.length > 0
+      ? Math.round(
+          cadenceSamples.reduce((s, v) => s + v.revolutionsPerMinute, 0) /
+            cadenceSamples.length,
+        )
+      : null;
+  const maxCadence =
+    cadenceSamples.length > 0
+      ? Math.round(
+          Math.max(...cadenceSamples.map(s => s.revolutionsPerMinute)),
+        )
+      : null;
+
+  const hasAnyData =
+    totalDistanceM > 0 ||
+    totalCalories > 0 ||
+    hrSamples.length > 0 ||
+    powerSamples.length > 0 ||
+    speedSamples.length > 0 ||
+    cadenceSamples.length > 0;
+
+  if (!hasAnyData) {
+    return (
+      <View style={styles.detailContainer}>
+        <Text style={styles.detailEmpty}>No additional data for this session</Text>
+      </View>
+    );
+  }
+
+  // Convert m/s to km/h for display
+  const formatSpeed = (ms: number) => (ms * 3.6).toFixed(1);
+
+  return (
+    <View style={styles.detailContainer}>
+      {totalDistanceM > 0 && (
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Distance</Text>
+          <Text style={styles.detailValue}>
+            {totalDistanceM >= 1000
+              ? `${(totalDistanceM / 1000).toFixed(2)} km`
+              : `${Math.round(totalDistanceM)} m`}
+          </Text>
+        </View>
+      )}
+      {totalCalories > 0 && (
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Calories</Text>
+          <Text style={styles.detailValue}>
+            {Math.round(totalCalories)} kcal
+          </Text>
+        </View>
+      )}
+      {avgHr !== null && (
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Heart Rate</Text>
+          <Text style={styles.detailValue}>
+            Avg {avgHr} | Min {minHr} | Max {maxHr} bpm
+          </Text>
+        </View>
+      )}
+      {avgPower !== null && (
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Power</Text>
+          <Text style={styles.detailValue}>
+            Avg {avgPower} | Max {maxPower} W
+          </Text>
+        </View>
+      )}
+      {avgSpeedMs !== null && (
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Speed</Text>
+          <Text style={styles.detailValue}>
+            Avg {formatSpeed(avgSpeedMs)} | Max {formatSpeed(maxSpeedMs!)} km/h
+          </Text>
+        </View>
+      )}
+      {avgCadence !== null && (
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Cadence</Text>
+          <Text style={styles.detailValue}>
+            Avg {avgCadence} | Max {maxCadence} rpm
+          </Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -462,5 +769,43 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#333',
     marginTop: 2,
+  },
+  exerciseRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  exerciseRowLeft: {
+    flex: 1,
+  },
+  chevron: {
+    fontSize: 12,
+    color: '#999',
+    marginLeft: 8,
+  },
+  detailContainer: {
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#ddd',
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 4,
+  },
+  detailLabel: {
+    fontSize: 13,
+    color: '#666',
+  },
+  detailValue: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#333',
+  },
+  detailEmpty: {
+    fontSize: 13,
+    color: '#999',
+    fontStyle: 'italic',
   },
 });
