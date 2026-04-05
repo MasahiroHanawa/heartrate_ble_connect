@@ -10,6 +10,10 @@ import {parseHeartRate} from './heartRateParser';
 const HR_SERVICE_UUID = '0000180d-0000-1000-8000-00805f9b34fb';
 const HR_MEASUREMENT_UUID = '00002a37-0000-1000-8000-00805f9b34fb';
 
+const RECONNECT_BASE_DELAY_MS = 1000;
+const RECONNECT_MAX_DELAY_MS = 30000;
+const RECONNECT_MAX_ATTEMPTS = 5;
+
 export class BleHeartRateSource implements HeartRateSource {
   private manager: BleManager;
   private heartRateCallbacks: Set<(bpm: number) => void> = new Set();
@@ -17,7 +21,10 @@ export class BleHeartRateSource implements HeartRateSource {
   private deviceCallbacks: Set<(device: DiscoveredDevice) => void> = new Set();
 
   private connectedDevice: Device | null = null;
+  private lastDeviceId: string | null = null;
   private monitorSubscription: Subscription | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
   private state: ConnectionState = 'idle';
 
   constructor() {
@@ -47,27 +54,34 @@ export class BleHeartRateSource implements HeartRateSource {
 
   stop(): void {
     this.manager.stopDeviceScan();
+    this.cancelReconnect();
     this.cleanUpMonitor();
     this.setState('idle');
   }
 
   async connectToDevice(deviceId: string): Promise<void> {
     this.manager.stopDeviceScan();
+    this.cancelReconnect();
+    this.lastDeviceId = deviceId;
+    this.reconnectAttempt = 0;
     this.setState('connecting');
 
     try {
       const device = await this.manager.connectToDevice(deviceId);
       await device.discoverAllServicesAndCharacteristics();
       this.connectedDevice = device;
+      this.reconnectAttempt = 0;
       this.setState('connected');
       this.subscribeToHeartRate(device);
     } catch (error) {
       console.warn('BLE connect error:', error);
-      this.setState('disconnected');
+      this.scheduleReconnect();
     }
   }
 
   async disconnect(): Promise<void> {
+    this.cancelReconnect();
+    this.lastDeviceId = null;
     this.cleanUpMonitor();
     if (this.connectedDevice) {
       try {
@@ -116,7 +130,8 @@ export class BleHeartRateSource implements HeartRateSource {
           // Device likely disconnected
           if (error.errorCode === 205 || error.errorCode === 201) {
             this.connectedDevice = null;
-            this.setState('disconnected');
+            this.cleanUpMonitor();
+            this.scheduleReconnect();
           }
           return;
         }
@@ -126,6 +141,62 @@ export class BleHeartRateSource implements HeartRateSource {
         }
       },
     );
+  }
+
+  private scheduleReconnect(): void {
+    if (!this.lastDeviceId) {
+      this.setState('disconnected');
+      return;
+    }
+
+    if (this.reconnectAttempt >= RECONNECT_MAX_ATTEMPTS) {
+      console.warn(
+        `BLE reconnect: giving up after ${RECONNECT_MAX_ATTEMPTS} attempts`,
+      );
+      this.setState('disconnected');
+      return;
+    }
+
+    const delay = Math.min(
+      RECONNECT_BASE_DELAY_MS * Math.pow(2, this.reconnectAttempt),
+      RECONNECT_MAX_DELAY_MS,
+    );
+    this.reconnectAttempt++;
+    this.setState('reconnecting');
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.lastDeviceId && this.state === 'reconnecting') {
+        this.attemptReconnect(this.lastDeviceId);
+      }
+    }, delay);
+  }
+
+  private async attemptReconnect(deviceId: string): Promise<void> {
+    this.setState('connecting');
+
+    try {
+      const device = await this.manager.connectToDevice(deviceId);
+      await device.discoverAllServicesAndCharacteristics();
+      this.connectedDevice = device;
+      this.reconnectAttempt = 0;
+      this.setState('connected');
+      this.subscribeToHeartRate(device);
+    } catch (error) {
+      console.warn(
+        `BLE reconnect attempt ${this.reconnectAttempt} failed:`,
+        error,
+      );
+      this.scheduleReconnect();
+    }
+  }
+
+  private cancelReconnect(): void {
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectAttempt = 0;
   }
 
   private cleanUpMonitor(): void {

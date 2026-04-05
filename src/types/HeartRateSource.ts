@@ -10,7 +10,8 @@ export type ConnectionState =
   | 'scanning'
   | 'connecting'
   | 'connected'
-  | 'disconnected';
+  | 'disconnected'
+  | 'reconnecting';
 
 export interface HeartRateSource {
   /** Begin scanning / generating data. */

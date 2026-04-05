@@ -14,12 +14,13 @@ export const ControlPanel = React.memo(function ControlPanel({
   onDisconnect,
 }: Props) {
   const isConnected = connectionState === 'connected';
+  const isReconnecting = connectionState === 'reconnecting';
   const isScanning = connectionState === 'scanning';
   const isBusy = connectionState === 'connecting';
 
   return (
     <View style={styles.container}>
-      {!isConnected && (
+      {!isConnected && !isReconnecting && (
         <TouchableOpacity
           style={[styles.button, styles.scanButton]}
           onPress={onScan}
@@ -30,7 +31,7 @@ export const ControlPanel = React.memo(function ControlPanel({
         </TouchableOpacity>
       )}
 
-      {isConnected && (
+      {(isConnected || isReconnecting) && (
         <TouchableOpacity
           style={[styles.button, styles.disconnectButton]}
           onPress={onDisconnect}>
