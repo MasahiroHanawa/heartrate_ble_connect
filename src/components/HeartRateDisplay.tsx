@@ -34,7 +34,9 @@ export const HeartRateDisplay = React.memo(function HeartRateDisplay({
             styles.statusDot,
             connectionState === 'connected'
               ? styles.dotConnected
-              : styles.dotDisconnected,
+              : connectionState === 'reconnecting'
+                ? styles.dotReconnecting
+                : styles.dotDisconnected,
           ]}
         />
         <Text style={styles.statusText}>{connectionState}</Text>
@@ -86,6 +88,9 @@ const styles = StyleSheet.create({
   },
   dotConnected: {
     backgroundColor: '#4CAF50',
+  },
+  dotReconnecting: {
+    backgroundColor: '#FF9800',
   },
   dotDisconnected: {
     backgroundColor: '#999',
