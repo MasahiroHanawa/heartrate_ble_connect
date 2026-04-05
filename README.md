@@ -1,98 +1,117 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# BLE Heart Rate Monitor
 
-# Getting Started
+A React Native prototype that demonstrates real-time heart rate data collection from BLE (Bluetooth Low Energy) sensors, with Android Health Connect integration for accessing synchronized health data.
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+Built as a feasibility study for mobile health data collection — the kind of sensor-to-app pipeline used in digital health research platforms.
 
-## Step 1: Start Metro
+## Features
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+### BLE Heart Rate Streaming
+- Scans for nearby Bluetooth heart rate sensors (standard Heart Rate Service 0x180D)
+- Connects and streams real-time BPM data
+- Displays current heart rate with rolling history (last 20 readings)
+- Supports both 8-bit and 16-bit BPM formats per Bluetooth SIG specification
+- Mock mode for development/testing without physical hardware
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+### Health Connect (Android)
+- Reads historical health data from Android's Health Connect API
+- Heart rate records with avg/min/max BPM statistics
+- Daily step counts
+- Exercise session history with duration and type
+- Fetches the last 7 days of data
+
+## Architecture
+
+```
+src/
+├── types/
+│   └── HeartRateSource.ts      # Interface for swappable data sources
+├── services/
+│   ├── BleHeartRateSource.ts    # Real BLE implementation
+│   ├── MockHeartRateSource.ts   # Mock for development/testing
+│   └── heartRateParser.ts       # BLE characteristic value parser
+├── hooks/
+│   └── useHeartRateStream.ts    # React hook managing state & subscriptions
+├── screens/
+│   ├── HeartRateScreen.tsx      # BLE monitor screen
+│   └── HealthConnectScreen.tsx  # Health Connect data viewer
+└── components/
+    ├── HeartRateDisplay.tsx      # BPM display + history
+    ├── DeviceList.tsx            # Discovered device list
+    └── ControlPanel.tsx          # Scan/disconnect controls
+```
+
+**Key design decisions:**
+- `HeartRateSource` interface allows swapping between BLE, mock, and future data sources without changing UI code
+- Heart rate parsing is isolated in its own module for testability
+- Callback-based subscriptions with cleanup functions to prevent memory leaks
+
+## Requirements
+
+- Node.js >= 22.11.0
+- React Native 0.84 development environment ([setup guide](https://reactnative.dev/docs/set-up-your-environment))
+- For BLE features: a physical device with Bluetooth (BLE does not work in emulators)
+- For Health Connect: Android device with Health Connect installed
+
+## Getting Started
 
 ```sh
-# Using npm
+# Install dependencies
+npm install
+
+# Start Metro bundler
 npm start
 
-# OR using Yarn
-yarn start
-```
-
-## Step 2: Build and run your app
-
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
-
-### Android
-
-```sh
-# Using npm
+# Run on Android
 npm run android
 
-# OR using Yarn
-yarn android
+# Run on iOS (install CocoaPods first)
+bundle install
+bundle exec pod install
+npm run ios
 ```
+
+## Testing
+
+```sh
+npm test
+```
+
+Tests cover:
+- **Heart rate parsing** — BLE characteristic value decoding (8-bit/16-bit BPM, base64 decode)
+- **MockHeartRateSource** — State transitions, device discovery, heart rate emission, cleanup
+- **useHeartRateStream hook** — State management, history capping, subscription lifecycle, unmount cleanup
+
+## Permissions
+
+### Android
+- `BLUETOOTH_SCAN`, `BLUETOOTH_CONNECT` (API 31+)
+- `ACCESS_FINE_LOCATION` (required for BLE scanning)
+- Health Connect read permissions for HeartRate, Steps, ExerciseSession
 
 ### iOS
+- Bluetooth usage (configured via Info.plist)
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
+## Tech Stack
 
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
+- React Native 0.84 / React 19
+- TypeScript 5.8
+- `react-native-ble-plx` — BLE communication
+- `react-native-health-connect` — Android Health Connect API
+- Jest — Testing
 
-```sh
-bundle install
-```
+## Known Limitations
 
-Then, and every time you update your native dependencies, run:
+- No background scanning or automatic reconnection
+- No persistent local data storage (data is in-memory only)
+- Health Connect is Android-only (no Apple HealthKit integration yet)
+- No data export or sync to remote server
+- Minimal error recovery on connection failures
 
-```sh
-bundle exec pod install
-```
+## Next Steps
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
-
-```sh
-# Using npm
-npm run ios
-
-# OR using Yarn
-yarn ios
-```
-
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
-
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
-
-## Step 3: Modify your app
-
-Now that you have successfully run the app, let's make changes!
-
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
-
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
-
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
-
-## Congratulations! :tada:
-
-You've successfully run and modified your React Native App. :partying_face:
-
-### Now what?
-
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
-
-# Troubleshooting
-
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
-
-# Learn More
-
-To learn more about React Native, take a look at the following resources:
-
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
-# heartrate_ble_connect
+- Connection state management with automatic reconnection
+- Local data persistence for offline-first operation
+- Apple HealthKit integration for iOS parity
+- Data quality validation and anomaly detection
+- Structured data export (FHIR-compatible)
